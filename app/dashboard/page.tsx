@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Download, Calendar, Package } from "lucide-react";
+import { Download, Calendar } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import StatCard from "../Components/StatCard"; // Pastikan path ini benar
 
 export default function Dashboard() {
   const [orders, setOrders] = useState<any[]>([]);
+  const [stats, setStats] = useState({ today: 0, month: 0, total: 0 });
   const [filterDate, setFilterDate] = useState(
     new Date().toISOString().split("T")[0],
   );
@@ -18,7 +20,25 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchData() {
       const { data } = await supabase.from("orders").select("*");
-      setOrders(data || []);
+      if (!data) return;
+      setOrders(data);
+
+      const now = new Date();
+      const todayStr = now.toISOString().split("T")[0];
+      const monthStr = now.toISOString().slice(0, 7);
+
+      const todayIncome = data
+        .filter((o) => o.created_at?.startsWith(todayStr))
+        .reduce((sum, o) => sum + Number(o.total_price), 0);
+      const monthIncome = data
+        .filter((o) => o.created_at?.startsWith(monthStr))
+        .reduce((sum, o) => sum + Number(o.total_price), 0);
+      const totalIncome = data.reduce(
+        (sum, o) => sum + Number(o.total_price),
+        0,
+      );
+
+      setStats({ today: todayIncome, month: monthIncome, total: totalIncome });
     }
     fetchData();
   }, []);
@@ -29,23 +49,15 @@ export default function Dashboard() {
     const title = isDay
       ? `Laporan Harian: ${filterDate}`
       : `Laporan Bulanan: ${filterMonth}`;
-
-    const filteredData = orders.filter((o) => {
-      if (!o.created_at) return false;
-      return isDay
-        ? o.created_at.startsWith(filterDate)
-        : o.created_at.startsWith(filterMonth);
-    });
-
-    const total = filteredData.reduce(
-      (sum, o) => sum + Number(o.total_price),
-      0,
+    const filtered = orders.filter((o) =>
+      o.created_at?.startsWith(isDay ? filterDate : filterMonth),
     );
+    const total = filtered.reduce((sum, o) => sum + Number(o.total_price), 0);
 
     doc.text(title, 14, 20);
     autoTable(doc, {
       head: [["ID Order", "Tanggal", "Total Harga"]],
-      body: filteredData.map((o) => [
+      body: filtered.map((o) => [
         o.id,
         o.created_at.slice(0, 10),
         `Rp ${Number(o.total_price).toLocaleString("id-ID")}`,
@@ -61,14 +73,38 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-8 bg-[#0f1117] text-white min-h-screen">
-      <h1 className="text-2xl font-bold mb-6">Laporan Pendapatan</h1>
+    <div className="p-8 bg-[#0f1117] text-gray-200 min-h-screen">
+      <h1 className="text-4xl font-extrabold text-white mb-8">
+        Dashboard Utama
+      </h1>
 
+      {/* Ringkasan Angka */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <StatCard
+          title="Pendapatan Hari Ini"
+          value={`Rp ${stats.today.toLocaleString("id-ID")}`}
+          subtitle="Omset hari ini"
+          data={[{ value: stats.today }]}
+        />
+        <StatCard
+          title="Pendapatan Bulan Ini"
+          value={`Rp ${stats.month.toLocaleString("id-ID")}`}
+          subtitle="Omset bulan ini"
+          data={[{ value: stats.month }]}
+        />
+        <StatCard
+          title="Total Pendapatan"
+          value={`Rp ${stats.total.toLocaleString("id-ID")}`}
+          subtitle="Seluruh pendapatan"
+          data={[{ value: stats.total }]}
+        />
+      </div>
+
+      {/* Filter & Export */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Filter Harian */}
         <div className="bg-[#141820] p-6 rounded-2xl border border-white/5">
           <h2 className="mb-4 font-semibold flex items-center gap-2">
-            <Calendar size={18} /> Laporan Harian
+            <Calendar size={18} /> Export Laporan Harian
           </h2>
           <input
             type="date"
@@ -78,16 +114,14 @@ export default function Dashboard() {
           />
           <button
             onClick={() => exportPDF("day")}
-            className="w-full bg-[#f59e0b] py-2 rounded font-bold flex items-center justify-center gap-2"
+            className="w-full bg-[#f59e0b] text-black py-2 rounded font-bold flex items-center justify-center gap-2"
           >
-            <Download size={16} /> Export PDF Harian
+            <Download size={16} /> Download PDF
           </button>
         </div>
-
-        {/* Filter Bulanan */}
         <div className="bg-[#141820] p-6 rounded-2xl border border-white/5">
           <h2 className="mb-4 font-semibold flex items-center gap-2">
-            <Calendar size={18} /> Laporan Bulanan
+            <Calendar size={18} /> Export Laporan Bulanan
           </h2>
           <input
             type="month"
@@ -97,9 +131,9 @@ export default function Dashboard() {
           />
           <button
             onClick={() => exportPDF("month")}
-            className="w-full bg-[#f59e0b] py-2 rounded font-bold flex items-center justify-center gap-2"
+            className="w-full bg-[#f59e0b] text-black py-2 rounded font-bold flex items-center justify-center gap-2"
           >
-            <Download size={16} /> Export PDF Bulanan
+            <Download size={16} /> Download PDF
           </button>
         </div>
       </div>
