@@ -11,6 +11,8 @@ export default function Dashboard() {
   const [stats, setStats] = useState({
     totalOrders: 0,
     totalIncome: 0,
+    incomeToday: 0, // Tambahan pendapatan hari ini
+    incomeThisMonth: 0, // Tambahan pendapatan bulan ini
     totalCustomers: 0,
     incomeChartData: [{ value: 0 }],
     orderChartData: [{ value: 0 }],
@@ -49,12 +51,40 @@ export default function Dashboard() {
 
       const orders = ordersData || [];
       const customers = customersData || [];
+
       const totalOrders = orders.length;
+      const totalCustomers = customers.length;
+
+      // 1. HITUNG TOTAL PENDAPATAN KESELURUHAN
       const totalIncome = orders.reduce(
         (sum, order) => sum + Number(order.total_price),
         0,
       );
-      const totalCustomers = customers.length;
+
+      // Mendapatkan tanggal hari ini (WIB / Lokal komputer)
+      const hariIni = new Date();
+      const stringHariIni = hariIni.toLocaleDateString("en-CA"); // Format YYYY-MM-DD
+      const bulanIni = hariIni.getMonth();
+      const tahunIni = hariIni.getFullYear();
+
+      // 2. HITUNG PENDAPATAN HARI INI
+      const incomeToday = orders.reduce((sum, order) => {
+        if (!order.created_at) return sum;
+        // Ambil bagian tanggalnya saja (YYYY-MM-DD) dari string created_at Supabase
+        const tglOrder = order.created_at.split("T")[0];
+        return tglOrder === stringHariIni
+          ? sum + Number(order.total_price)
+          : sum;
+      }, 0);
+
+      // 3. HITUNG PENDAPATAN BULAN INI
+      const incomeThisMonth = orders.reduce((sum, order) => {
+        if (!order.created_at) return sum;
+        const d = new Date(order.created_at);
+        return d.getMonth() === bulanIni && d.getFullYear() === tahunIni
+          ? sum + Number(order.total_price)
+          : sum;
+      }, 0);
 
       const recentOrders = orders.slice(-6);
       const incomeChartData =
@@ -69,6 +99,8 @@ export default function Dashboard() {
       setStats({
         totalOrders,
         totalIncome,
+        incomeToday,
+        incomeThisMonth,
         totalCustomers,
         incomeChartData,
         orderChartData,
@@ -79,16 +111,12 @@ export default function Dashboard() {
   }, [router]);
 
   return (
-    // Background disamakan dengan layout agar hitam pekat elegan
     <div className="bg-[#0f1117] text-gray-200 min-h-[calc(100vh-4rem)] -m-8 p-8 flex flex-col gap-6 relative overflow-hidden z-0">
-      {/* --- EFEK CAHAYA GLOWING (Diubah ke Kuning Emas/Orange) --- */}
       <div className="absolute top-10 left-10 w-96 h-96 bg-[#f59e0b] rounded-full mix-blend-screen filter blur-[150px] opacity-[0.08] pointer-events-none -z-10"></div>
       <div className="absolute bottom-10 right-10 w-96 h-96 bg-[#ea580c] rounded-full mix-blend-screen filter blur-[150px] opacity-[0.05] pointer-events-none -z-10"></div>
 
       <div className="flex justify-between items-start mb-4">
         <div>
-          {/* Label OVERVIEW diubah ke warna kuning emas */}
-
           <h1 className="text-4xl font-extrabold text-white tracking-tight">
             Halaman Utama
           </h1>
@@ -96,30 +124,48 @@ export default function Dashboard() {
       </div>
 
       {isLoading ? (
-        // Loading state warna kuning
         <div className="text-amber-500 animate-pulse font-medium bg-[#141820] p-6 rounded-2xl border border-amber-900/30 text-center">
           Mengambil data real-time...
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard
-            title="Jumlah Pesanan"
-            value={stats.totalOrders.toString()}
-            subtitle="Total pesanan di sistem"
-            data={stats.orderChartData}
-          />
-          <StatCard
-            title="Pendapatan"
-            value={`Rp ${stats.totalIncome.toLocaleString("id-ID")}`}
-            subtitle="Total pendapatan keseluruhan"
-            data={stats.incomeChartData}
-          />
-          <StatCard
-            title="Jumlah Pelanggan"
-            value={stats.totalCustomers.toString()}
-            subtitle="Total pelanggan terdaftar"
-            data={stats.orderChartData}
-          />
+        <div className="flex flex-col gap-6">
+          {/* BARIS UTAMA: KELOMPOK KARTU PENDAPATAN */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <StatCard
+              title="Pendapatan Hari Ini"
+              value={`Rp ${stats.incomeToday.toLocaleString("id-ID")}`}
+              subtitle="Total omset khusus hari ini"
+              data={stats.incomeChartData}
+            />
+            <StatCard
+              title="Pendapatan Bulan Ini"
+              value={`Rp ${stats.incomeThisMonth.toLocaleString("id-ID")}`}
+              subtitle="Total omset bulan berjalan"
+              data={stats.incomeChartData}
+            />
+            <StatCard
+              title="Total Pendapatan"
+              value={`Rp ${stats.totalIncome.toLocaleString("id-ID")}`}
+              subtitle="Total pendapatan keseluruhan"
+              data={stats.incomeChartData}
+            />
+          </div>
+
+          {/* BARIS KEDUA: KELOMPOK DATA TRANSAKSI & PELANGGAN */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <StatCard
+              title="Jumlah Pesanan"
+              value={stats.totalOrders.toString()}
+              subtitle="Total pesanan di sistem"
+              data={stats.orderChartData}
+            />
+            <StatCard
+              title="Jumlah Pelanggan"
+              value={stats.totalCustomers.toString()}
+              subtitle="Total pelanggan terdaftar"
+              data={stats.orderChartData}
+            />
+          </div>
         </div>
       )}
     </div>
