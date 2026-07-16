@@ -16,7 +16,6 @@ export default function ProductsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // 1. UPDATE STATE FORM DATA (Menambahkan harga_beli)
   const [formData, setFormData] = useState({
     nama: "",
     harga_beli: "",
@@ -26,14 +25,21 @@ export default function ProductsPage() {
   });
 
   const fetchProducts = async () => {
-    const { data } = await supabase
-      .from("products")
-      .select("*")
-      .order("created_at", { ascending: false });
-    setProducts(data || []);
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setProducts(data || []);
+    } catch (err: any) {
+      console.error("Error fetching products:", err.message);
+    }
   };
 
   useEffect(() => {
+    let isMounted = true;
     const init = async () => {
       setIsLoading(true);
       const {
@@ -49,57 +55,28 @@ export default function ProductsPage() {
         .select("role")
         .eq("id", user.id)
         .single();
+
       if (profile?.role === "petugas") {
         alert("Akses Ditolak!");
         router.push("/pos");
         return;
       }
-      await fetchProducts();
-      setIsLoading(false);
+
+      if (isMounted) {
+        await fetchProducts();
+        setIsLoading(false);
+      }
     };
+
     init();
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
-  // 2. UPDATE FUNGSI RESET & OPEN MODAL
-  const handleOpenAdd = () => {
-    setEditingId(null);
-    setFormData({
-      nama: "",
-      harga_beli: "",
-      harga: "",
-      satuan: "pcs",
-      kategori: "ATK",
-    });
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setEditingId(null);
-    setFormData({
-      nama: "",
-      harga_beli: "",
-      harga: "",
-      satuan: "pcs",
-      kategori: "ATK",
-    });
-  };
-
-  const openEditModal = (p: any) => {
-    setEditingId(p.id);
-    setFormData({
-      nama: p.nama || "",
-      harga_beli: p.harga_beli?.toString() || "",
-      harga: p.harga?.toString() || "",
-      satuan: p.satuan || "pcs",
-      kategori: p.kategori || "ATK",
-    });
-    setIsModalOpen(true);
-  };
-
-  // 3. UPDATE HANDLING SAVE DATA TO SUPABASE
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     setIsSaving(true);
 
     const payload = {
@@ -112,14 +89,12 @@ export default function ProductsPage() {
 
     try {
       if (editingId) {
-        // --- MODE EDIT PRODUK ---
         const { error } = await supabase
           .from("products")
           .update(payload)
           .eq("id", editingId);
         if (error) throw error;
       } else {
-        // --- MODE TAMBAH PRODUK BARU ---
         const { data: existingProduct } = await supabase
           .from("products")
           .select("id")
@@ -138,7 +113,15 @@ export default function ProductsPage() {
         if (error) throw error;
       }
 
-      closeModal();
+      setIsModalOpen(false);
+      setEditingId(null);
+      setFormData({
+        nama: "",
+        harga_beli: "",
+        harga: "",
+        satuan: "pcs",
+        kategori: "ATK",
+      });
       await fetchProducts();
     } catch (err: any) {
       alert("Gagal menyimpan data: " + err.message);
@@ -154,7 +137,7 @@ export default function ProductsPage() {
     const { count } = await supabase
       .from("order_items")
       .select("*", { count: "exact", head: true })
-      .eq("kd_prod", product?.kd_prod);
+      .eq("kd_prod", product?.kd_produk);
 
     if (count && count > 0) {
       alert(
@@ -168,7 +151,6 @@ export default function ProductsPage() {
     else await fetchProducts();
   };
 
-  // 4. UPDATE EXPORT PDF (Menambahkan kolom Harga Beli & Laba)
   const exportToPDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(14);
@@ -193,7 +175,7 @@ export default function ProductsPage() {
       body: products.map((p) => {
         const laba = (p.harga || 0) - (p.harga_beli || 0);
         return [
-          p.kd_prod || "-",
+          p.kd_produk || "-",
           p.nama || "-",
           `Rp ${Number(p.harga_beli || 0).toLocaleString("id-ID")}`,
           `Rp ${Number(p.harga || 0).toLocaleString("id-ID")}`,
@@ -212,128 +194,118 @@ export default function ProductsPage() {
   };
 
   const filtered = products.filter((p) =>
-    [p.kd_prod, p.nama, p.kategori, p.satuan]
+    [p.kd_produk, p.nama, p.kategori, p.satuan]
       .join(" ")
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Master Produk</h1>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={exportToPDF}
-            title="Cetak PDF"
-            aria-label="Cetak PDF"
-            className="flex items-center gap-2 px-4 py-2 bg-[#141820] border border-white/8 text-gray-300 hover:text-white rounded-xl text-sm transition-all shadow-lg"
-          >
-            <Download size={15} /> Cetak PDF
-          </button>
-          <button
-            onClick={handleOpenAdd}
-            title="Tambah Produk Baru"
-            aria-label="Tambah Produk Baru"
-            className="flex items-center gap-2 px-4 py-2 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-xl text-sm font-semibold transition-all shadow-lg"
-          >
-            <Plus size={15} /> Tambah Produk
-          </button>
-        </div>
-      </div>
-
-      {/* Tabel */}
-      <div className="bg-[#141820] border border-white/5 rounded-2xl overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex justify-end">
-          <div className="relative">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-              size={14}
-            />
-            <input
-              type="text"
-              placeholder="Cari produk..."
-              title="Cari Produk"
-              aria-label="Cari Produk"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="bg-[#0f1117] border border-white/8 text-white text-sm pl-9 pr-4 py-2 rounded-lg w-56 focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
-            />
+    <div className="w-full relative">
+      <div className="flex flex-col gap-6">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-white">Master Produk</h1>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={exportToPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-[#141820] border border-white/8 text-gray-300 hover:text-white rounded-xl text-sm transition-all shadow-lg"
+            >
+              <Download size={15} /> Cetak PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingId(null);
+                setFormData({
+                  nama: "",
+                  harga_beli: "",
+                  harga: "",
+                  satuan: "pcs",
+                  kategori: "ATK",
+                });
+                setIsModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-xl text-sm font-semibold transition-all shadow-lg"
+            >
+              <Plus size={15} /> Tambah Produk
+            </button>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-white/5 text-xs text-gray-500 uppercase tracking-wider">
-                <th className="px-5 py-3 text-left font-medium">Kd. Produk</th>
-                <th className="px-5 py-3 text-left font-medium">Nama</th>
-                {/* 5. MENAMBAHKAN TH DI TABEL */}
-                <th className="px-5 py-3 text-left font-medium">Harga Beli</th>
-                <th className="px-5 py-3 text-left font-medium">Harga Jual</th>
-                <th className="px-5 py-3 text-left font-medium">Laba</th>
-                <th className="px-5 py-3 text-left font-medium">Stok</th>
-                <th className="px-5 py-3 text-left font-medium">Satuan</th>
-                <th className="px-5 py-3 text-left font-medium">Kategori</th>
-                <th className="px-5 py-3 text-right font-medium">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {isLoading ? (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-10 text-center text-gray-500 animate-pulse"
-                  >
-                    Memuat data...
-                  </td>
+        {/* Tabel */}
+        <div className="bg-[#141820] border border-white/5 rounded-2xl overflow-hidden shadow-xl">
+          <div className="p-4 border-b border-white/5 flex justify-end">
+            <div className="relative">
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+                size={14}
+              />
+              <input
+                type="text"
+                placeholder="Cari produk..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="bg-[#0f1117] border border-white/8 text-white text-sm pl-9 pr-4 py-2 rounded-lg w-56 focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-white/5 text-xs text-gray-500 uppercase tracking-wider">
+                  <th className="px-5 py-3 font-medium">Kd. Produk</th>
+                  <th className="px-5 py-3 font-medium">Nama</th>
+                  <th className="px-5 py-3 font-medium">Harga Jual</th>
+                  <th className="px-5 py-3 font-medium">Stok</th>
+                  <th className="px-5 py-3 font-medium">Satuan</th>
+                  <th className="px-5 py-3 font-medium">Kategori</th>
+                  <th className="px-5 py-3 text-right font-medium">Aksi</th>
                 </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-10 text-center text-gray-500"
-                  >
-                    Produk tidak ditemukan.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((p) => {
-                  {
-                    /* 6. LOGIKA PERHITUNGAN LABA */
-                  }
-                  const keuntungan = (p.harga || 0) - (p.harga_beli || 0);
-                  return (
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-5 py-10 text-center text-gray-400 animate-pulse"
+                    >
+                      Memuat data produk...
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-5 py-10 text-center text-gray-500"
+                    >
+                      Produk tidak ditemukan.
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((p) => (
                     <tr
                       key={p.id}
-                      className="hover:bg-white/2 transition-colors"
+                      className="hover:bg-white/5 transition-colors"
                     >
                       <td className="px-5 py-4">
-                        <span className="bg-[#f59e0b]/10 text-[#f59e0b] text-xs font-mono font-semibold px-2.5 py-1 rounded-lg">
-                          {p.kd_prod}
+                        <span className="bg-[#1a1f2b] text-[#f59e0b] text-xs font-mono font-bold px-2.5 py-1 rounded-lg">
+                          {p.kd_produk || "-"}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-white font-medium">
                         {p.nama}
                       </td>
-                      {/* 7. MENAMPILKAN DATA DI KOLOM BARU */}
                       <td className="px-5 py-4 text-gray-300">
-                        Rp {Number(p.harga_beli || 0).toLocaleString("id-ID")}
-                      </td>
-                      <td className="px-5 py-4 text-gray-300">
-                        Rp {Number(p.harga).toLocaleString("id-ID")}
-                      </td>
-                      <td
-                        className={`px-5 py-4 font-medium ${keuntungan < 0 ? "text-red-400" : "text-green-400"}`}
-                      >
-                        Rp {Number(keuntungan).toLocaleString("id-ID")}
+                        Rp {Number(p.harga || 0).toLocaleString("id-ID")}
                       </td>
                       <td className="px-5 py-4">
                         <span
-                          className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${p.stok <= 0 ? "bg-red-400/10 text-red-400" : p.stok <= 5 ? "bg-yellow-400/10 text-yellow-400" : "bg-green-400/10 text-green-400"}`}
+                          className={`text-xs font-bold px-2.5 py-1 rounded-lg ${p.stok <= 0 ? "bg-red-400/10 text-red-400" : p.stok <= 5 ? "bg-yellow-400/10 text-yellow-400" : "bg-green-400/10 text-green-400"}`}
                         >
                           {p.stok ?? 0}
                         </span>
@@ -344,158 +316,157 @@ export default function ProductsPage() {
                       <td className="px-5 py-4 text-gray-400">
                         {p.kategori || "-"}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => openEditModal(p)}
-                            title="Edit Produk"
                             aria-label="Edit Produk"
-                            className="p-1.5 text-gray-500 hover:text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-lg transition-all"
+                            onClick={() => {
+                              setEditingId(p.id);
+                              setFormData({
+                                nama: p.nama || "",
+                                harga_beli: p.harga_beli?.toString() || "",
+                                harga: p.harga?.toString() || "",
+                                satuan: p.satuan || "pcs",
+                                kategori: p.kategori || "ATK",
+                              });
+                              setIsModalOpen(true);
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-white rounded-lg transition-all"
                           >
                             <Edit size={14} />
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(p.id)}
-                            title="Hapus Produk"
                             aria-label="Hapus Produk"
-                            className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                            onClick={() => handleDelete(p.id)}
+                            className="p-1.5 text-gray-500 hover:text-red-400 rounded-lg transition-all"
                           >
                             <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      {/* Modal Form */}
+      {/* MODAL FIXED */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#141820] border border-white/8 rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-white/5">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+          <div className="bg-[#141820] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-150">
+            {/* Header Modal */}
+            <div className="flex justify-between items-center px-6 py-4 border-b border-white/5 bg-[#171c26]">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-[#f59e0b]/10 rounded-lg flex items-center justify-center">
                   <Package size={16} className="text-[#f59e0b]" />
                 </div>
                 <h2 className="text-base font-semibold text-white">
-                  {editingId ? "Edit Produk" : "Tambah Master Produk Baru"}
+                  {editingId
+                    ? "Edit Master Produk"
+                    : "Tambah Master Produk Baru"}
                 </h2>
               </div>
               <button
                 type="button"
-                onClick={closeModal}
-                title="Tutup Modal"
                 aria-label="Tutup Modal"
-                className="text-gray-500 hover:text-white transition-colors"
+                onClick={() => setIsModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg transition-colors bg-white/5 hover:bg-white/10"
               >
                 <X size={18} />
               </button>
             </div>
+
+            {/* Form Input */}
             <form
               onSubmit={handleSave}
-              autoComplete="off"
-              className="p-6 flex flex-col gap-4"
+              className="p-6 flex flex-col gap-4 bg-[#141820]"
             >
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                   Nama Produk <span className="text-red-400">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  title="Nama Produk"
-                  aria-label="Nama Produk"
                   value={formData.nama}
                   onChange={(e) =>
                     setFormData({ ...formData, nama: e.target.value })
                   }
                   placeholder="Cth: Pulpen Standar"
-                  className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+                  className="bg-[#0f1117] border border-white/10 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b] transition-all placeholder:text-gray-600 w-full"
                 />
               </div>
 
-              {/* 8. MENAMBAHKAN INPUT INPUT BARU UNTUK HARGA BELI */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Harga Beli Pemasok (Rp){" "}
-                    <span className="text-red-400">*</span>
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Harga Beli Pemasok <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="number"
                     required
-                    title="Harga Beli"
-                    aria-label="Harga Beli"
                     value={formData.harga_beli}
                     onChange={(e) =>
                       setFormData({ ...formData, harga_beli: e.target.value })
                     }
-                    placeholder="Cth: 2000"
-                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+                    placeholder="Rp 2.000"
+                    className="bg-[#0f1117] border border-white/10 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b] transition-all placeholder:text-gray-600 w-full"
                   />
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Harga Jual (Rp) <span className="text-red-400">*</span>
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Harga Jual Toko <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="number"
                     required
-                    title="Harga Jual"
-                    aria-label="Harga Jual"
                     value={formData.harga}
                     onChange={(e) =>
                       setFormData({ ...formData, harga: e.target.value })
                     }
-                    placeholder="Cth: 3000"
-                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+                    placeholder="Rp 3.000"
+                    className="bg-[#0f1117] border border-white/10 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b] transition-all placeholder:text-gray-600 w-full"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    SATUAN
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Satuan
                   </label>
                   <select
-                    title="Pilih Satuan"
-                    aria-label="Pilih Satuan"
                     value={formData.satuan}
                     onChange={(e) =>
                       setFormData({ ...formData, satuan: e.target.value })
                     }
-                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all"
+                    className="bg-[#0f1117] border border-white/10 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b] transition-all w-full cursor-pointer"
                   >
-                    <option value="pcs">Pcs</option>
-                    <option value="kg">Kg</option>
+                    <option value="pcs">Pcs (Keping)</option>
+                    <option value="kg">Kg (Kilogram)</option>
                     <option value="liter">Liter</option>
-                    <option value="dus">Dus</option>
+                    <option value="dus">Dus (Karton)</option>
                     <option value="lusin">Lusin</option>
                     <option value="pack">Pack</option>
                     <option value="botol">Botol</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    KATEGORI
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Kategori
                   </label>
                   <select
-                    title="Pilih Kategori"
-                    aria-label="Pilih Kategori"
                     value={formData.kategori}
                     onChange={(e) =>
                       setFormData({ ...formData, kategori: e.target.value })
                     }
-                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all"
+                    className="bg-[#0f1117] border border-white/10 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b] transition-all w-full cursor-pointer"
                   >
                     <option value="ATK">ATK</option>
                     <option value="Makanan">Makanan</option>
@@ -507,21 +478,20 @@ export default function ProductsPage() {
               </div>
 
               {!editingId && (
-                <div className="bg-[#f59e0b]/5 border border-[#f59e0b]/15 rounded-xl px-4 py-3 mt-2">
-                  <p className="text-xs text-gray-500">
-                    💡 Produk baru akan dibuat dengan{" "}
-                    <span className="text-[#f59e0b]">Stok: 0</span>. Lakukan
-                    pengisian stok melalui menu <b>Barang Masuk</b>.
+                <div className="bg-[#f59e0b]/5 border border-[#f59e0b]/10 rounded-xl px-4 py-3 mt-1">
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    💡 <b>Info:</b> Master produk baru otomatis dibuat dengan
+                    nilai <b>Stok: 0</b>. Anda dapat mengisi jumlah kuantitas
+                    stoknya lewat modul menu <b>Barang Masuk</b>.
                   </p>
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-4 border-t border-white/5 mt-2">
+              {/* Aksi Tombol */}
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-white/5 mt-2">
                 <button
                   type="button"
-                  onClick={closeModal}
-                  title="Batal"
-                  aria-label="Batal"
+                  onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all"
                 >
                   Batal
@@ -529,11 +499,9 @@ export default function ProductsPage() {
                 <button
                   type="submit"
                   disabled={isSaving}
-                  title="Simpan"
-                  aria-label="Simpan"
                   className="px-6 py-2 text-sm font-semibold bg-[#f59e0b] hover:bg-[#d97706] disabled:opacity-50 text-white rounded-xl transition-all shadow-lg shadow-[#f59e0b]/20"
                 >
-                  {isSaving ? "Menyimpan..." : "Simpan"}
+                  {isSaving ? "Menyimpan..." : "Simpan Produk"}
                 </button>
               </div>
             </form>
