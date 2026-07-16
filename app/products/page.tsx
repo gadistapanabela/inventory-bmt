@@ -2,12 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
-import { Trash2, Edit2, Plus, Download } from "lucide-react";
-import { useRouter } from "next/navigation"; // Import useRouter untuk navigasi
+import { Trash2, Edit2, Plus, Download, X } from "lucide-react";
 
 export default function Products() {
-  const router = useRouter(); // Inisialisasi router
   const [products, setProducts] = useState<any[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     async function fetchProducts() {
@@ -17,13 +16,11 @@ export default function Products() {
     fetchProducts();
   }, []);
 
-  // Fungsi navigasi ke halaman tambah produk
-  const handleAddProduct = () => {
-    router.push("/products/add"); // Pastikan Anda sudah punya file ini di folder app/products/add/page.tsx
-  };
+  const handleEdit = (id: any) => console.log("Edit:", id);
+  const handleDelete = (id: any) => console.log("Hapus:", id);
 
   return (
-    <div className="p-8 bg-[#0f1117] text-gray-200 min-h-screen">
+    <div className="p-8 bg-[#0f1117] text-gray-200 min-h-screen relative">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-white">Master Produk</h1>
         <div className="flex gap-2">
@@ -31,7 +28,7 @@ export default function Products() {
             <Download size={18} /> Cetak PDF
           </button>
           <button
-            onClick={handleAddProduct} // Menambahkan fungsi klik
+            onClick={() => setIsModalOpen(true)}
             className="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold flex items-center gap-2"
           >
             <Plus size={18} /> Tambah Produk
@@ -40,11 +37,82 @@ export default function Products() {
       </div>
 
       <div className="bg-[#141820] border border-white/5 rounded-xl overflow-hidden">
-        {/* ... sisa tabel tetap sama ... */}
         <table className="w-full text-left">
-          {/* ... isi tabel sama seperti kode sebelumnya ... */}
+          <thead className="text-gray-500 text-xs uppercase">
+            <tr>
+              <th className="p-4">Kd. Produk</th>
+              <th className="p-4">Nama</th>
+              <th className="p-4">Harga Jual</th>
+              <th className="p-4">Stok</th>
+              <th className="p-4">Satuan</th>
+              <th className="p-4">Kategori</th>
+              <th className="p-4 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((p) => (
+              <tr
+                key={p.id}
+                className="border-t border-white/5 hover:bg-white/5"
+              >
+                <td className="p-4">
+                  <span className="bg-[#1a1f2b] text-amber-500 px-2 py-1 rounded text-xs font-bold">
+                    {p.code}
+                  </span>
+                </td>
+                <td className="p-4 font-medium">{p.name}</td>
+                <td className="p-4">
+                  Rp {Number(p.price).toLocaleString("id-ID")}
+                </td>
+                <td className="p-4">
+                  <span className="bg-green-900/30 text-green-400 px-2 py-1 rounded text-xs font-bold">
+                    {p.stock}
+                  </span>
+                </td>
+                <td className="p-4">{p.unit}</td>
+                <td className="p-4">{p.category}</td>
+                <td className="p-4 text-right">
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => handleEdit(p.id)}
+                      className="text-gray-500 hover:text-white cursor-pointer p-2"
+                      aria-label="Edit Produk"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p.id)}
+                      className="text-gray-500 hover:text-red-500 cursor-pointer p-2"
+                      aria-label="Hapus Produk"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#141820] p-6 rounded-xl border border-white/10 w-96">
+            <div className="flex justify-between mb-4">
+              <h2 className="text-xl font-bold">Tambah Produk</h2>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                aria-label="Tutup Modal"
+              >
+                <X />
+              </button>
+            </div>
+            <p className="text-gray-400">
+              Form input produk akan muncul di sini.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
