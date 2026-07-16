@@ -1,142 +1,119 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Download, Calendar } from "lucide-react";
+import StatCard from "../Components/StatCard";
 import { supabase } from "../../lib/supabase";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import StatCard from "../Components/StatCard"; // Pastikan path ini benar
+import { useRouter } from "next/navigation";
 
 export default function Dashboard() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [stats, setStats] = useState({ today: 0, month: 0, total: 0 });
-  const [filterDate, setFilterDate] = useState(
-    new Date().toISOString().split("T")[0],
-  );
-  const [filterMonth, setFilterMonth] = useState(
-    new Date().toISOString().slice(0, 7),
-  );
+  const router = useRouter();
+  const [stats, setStats] = useState({
+    totalOrders: 0,
+    totalIncome: 0,
+    totalCustomers: 0,
+    incomeChartData: [{ value: 0 }],
+    orderChartData: [{ value: 0 }],
+  });
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    async function fetchData() {
-      const { data } = await supabase.from("orders").select("*");
-      if (!data) return;
-      setOrders(data);
+    async function checkRoleAndFetchData() {
+      setIsLoading(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/");
+        return;
+      }
 
-      const now = new Date();
-      const todayStr = now.toISOString().split("T")[0];
-      const monthStr = now.toISOString().slice(0, 7);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+      if (profile?.role === "petugas") {
+        alert("Akses Ditolak! Petugas tidak bisa membuka Dashboard.");
+        router.push("/pos");
+        return;
+      }
 
-      const todayIncome = data
-        .filter((o) => o.created_at?.startsWith(todayStr))
-        .reduce((sum, o) => sum + Number(o.total_price), 0);
-      const monthIncome = data
-        .filter((o) => o.created_at?.startsWith(monthStr))
-        .reduce((sum, o) => sum + Number(o.total_price), 0);
-      const totalIncome = data.reduce(
-        (sum, o) => sum + Number(o.total_price),
+      const { data: ordersData } = await supabase
+        .from("orders")
+        .select("*")
+        .order("created_at", { ascending: true });
+      const { data: customersData } = await supabase
+        .from("customers")
+        .select("*");
+
+      const orders = ordersData || [];
+      const customers = customersData || [];
+      const totalOrders = orders.length;
+      const totalIncome = orders.reduce(
+        (sum, order) => sum + Number(order.total_price),
         0,
       );
+      const totalCustomers = customers.length;
 
-      setStats({ today: todayIncome, month: monthIncome, total: totalIncome });
+      const recentOrders = orders.slice(-6);
+      const incomeChartData =
+        recentOrders.length > 0
+          ? recentOrders.map((o) => ({ value: Number(o.total_price) }))
+          : [{ value: 0 }];
+      const orderChartData =
+        recentOrders.length > 0
+          ? recentOrders.map((_, index) => ({ value: index + 1 }))
+          : [{ value: 0 }];
+
+      setStats({
+        totalOrders,
+        totalIncome,
+        totalCustomers,
+        incomeChartData,
+        orderChartData,
+      });
+      setIsLoading(false);
     }
-    fetchData();
-  }, []);
-
-  const exportPDF = (type: "day" | "month") => {
-    const doc = new jsPDF();
-    const isDay = type === "day";
-    const title = isDay
-      ? `Laporan Harian: ${filterDate}`
-      : `Laporan Bulanan: ${filterMonth}`;
-    const filtered = orders.filter((o) =>
-      o.created_at?.startsWith(isDay ? filterDate : filterMonth),
-    );
-    const total = filtered.reduce((sum, o) => sum + Number(o.total_price), 0);
-
-    doc.text(title, 14, 20);
-    autoTable(doc, {
-      head: [["ID Order", "Tanggal", "Total Harga"]],
-      body: filtered.map((o) => [
-        o.id,
-        o.created_at.slice(0, 10),
-        `Rp ${Number(o.total_price).toLocaleString("id-ID")}`,
-      ]),
-      startY: 30,
-    });
-    doc.text(
-      `Total Pendapatan: Rp ${total.toLocaleString("id-ID")}`,
-      14,
-      (doc as any).lastAutoTable.finalY + 10,
-    );
-    doc.save(`${title}.pdf`);
-  };
+    checkRoleAndFetchData();
+  }, [router]);
 
   return (
-    <div className="p-8 bg-[#0f1117] text-gray-200 min-h-screen">
-      <h1 className="text-4xl font-extrabold text-white mb-8">
-        Dashboard Utama
-      </h1>
+    <div className="bg-[#0f1117] text-gray-200 min-h-[calc(100vh-4rem)] -m-8 p-8 flex flex-col gap-6 relative overflow-hidden z-0">
+      <div className="absolute top-10 left-10 w-96 h-96 bg-[#f59e0b] rounded-full mix-blend-screen filter blur-[150px] opacity-[0.08] pointer-events-none -z-10"></div>
+      <div className="absolute bottom-10 right-10 w-96 h-96 bg-[#ea580c] rounded-full mix-blend-screen filter blur-[150px] opacity-[0.05] pointer-events-none -z-10"></div>
 
-      {/* Ringkasan Angka */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard
-          title="Pendapatan Hari Ini"
-          value={`Rp ${stats.today.toLocaleString("id-ID")}`}
-          subtitle="Omset hari ini"
-          data={[{ value: stats.today }]}
-        />
-        <StatCard
-          title="Pendapatan Bulan Ini"
-          value={`Rp ${stats.month.toLocaleString("id-ID")}`}
-          subtitle="Omset bulan ini"
-          data={[{ value: stats.month }]}
-        />
-        <StatCard
-          title="Total Pendapatan"
-          value={`Rp ${stats.total.toLocaleString("id-ID")}`}
-          subtitle="Seluruh pendapatan"
-          data={[{ value: stats.total }]}
-        />
+      <div className="flex justify-between items-start mb-4">
+        <h1 className="text-4xl font-extrabold text-white tracking-tight">
+          Halaman Utama
+        </h1>
       </div>
 
-      {/* Filter & Export */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-[#141820] p-6 rounded-2xl border border-white/5">
-          <h2 className="mb-4 font-semibold flex items-center gap-2">
-            <Calendar size={18} /> Export Laporan Harian
-          </h2>
-          <input
-            type="date"
-            value={filterDate}
-            onChange={(e) => setFilterDate(e.target.value)}
-            className="w-full bg-[#0f1117] p-2 rounded mb-4 border border-white/10"
-          />
-          <button
-            onClick={() => exportPDF("day")}
-            className="w-full bg-[#f59e0b] text-black py-2 rounded font-bold flex items-center justify-center gap-2"
-          >
-            <Download size={16} /> Download PDF
-          </button>
+      {isLoading ? (
+        <div className="text-amber-500 animate-pulse font-medium bg-[#141820] p-6 rounded-2xl border border-amber-900/30 text-center">
+          Mengambil data real-time...
         </div>
-        <div className="bg-[#141820] p-6 rounded-2xl border border-white/5">
-          <h2 className="mb-4 font-semibold flex items-center gap-2">
-            <Calendar size={18} /> Export Laporan Bulanan
-          </h2>
-          <input
-            type="month"
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value)}
-            className="w-full bg-[#0f1117] p-2 rounded mb-4 border border-white/10"
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <StatCard
+            title="Jumlah Pesanan"
+            value={stats.totalOrders.toString()}
+            subtitle="Total pesanan di sistem"
+            data={stats.orderChartData}
           />
-          <button
-            onClick={() => exportPDF("month")}
-            className="w-full bg-[#f59e0b] text-black py-2 rounded font-bold flex items-center justify-center gap-2"
-          >
-            <Download size={16} /> Download PDF
-          </button>
+          <StatCard
+            title="Pendapatan"
+            value={`Rp ${stats.totalIncome.toLocaleString("id-ID")}`}
+            subtitle="Total pendapatan keseluruhan"
+            data={stats.incomeChartData}
+          />
+          <StatCard
+            title="Jumlah Pelanggan"
+            value={stats.totalCustomers.toString()}
+            subtitle="Total pelanggan terdaftar"
+            data={stats.orderChartData}
+          />
         </div>
-      </div>
+      )}
     </div>
   );
 }
