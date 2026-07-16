@@ -15,6 +15,10 @@ export default function Products() {
     fetchProducts();
   }, []);
 
+  // Fungsi contoh untuk aksi
+  const handleEdit = (id: any) => console.log("Edit:", id);
+  const handleDelete = (id: any) => console.log("Hapus:", id);
+
   return (
     <div className="p-8 bg-[#0f1117] text-gray-200 min-h-screen">
       <div className="flex justify-between items-center mb-8">
@@ -30,7 +34,6 @@ export default function Products() {
       </div>
 
       <div className="bg-[#141820] border border-white/5 rounded-xl overflow-hidden">
-        {/* Search Bar Placeholder */}
         <div className="p-4 border-b border-white/5">
           <input
             type="text"
@@ -73,17 +76,19 @@ export default function Products() {
                 </td>
                 <td className="p-4">{p.unit}</td>
                 <td className="p-4">{p.category}</td>
-                <td className="p-4 text-right">
+                <td className="p-4 text-right relative z-10">
                   <div className="flex justify-end gap-3">
                     <button
+                      onClick={() => handleEdit(p.id)}
+                      className="text-gray-500 hover:text-white cursor-pointer p-2 transition-colors"
                       aria-label="Edit Produk"
-                      className="text-gray-500 hover:text-white"
                     >
                       <Edit2 size={16} />
                     </button>
                     <button
+                      onClick={() => handleDelete(p.id)}
+                      className="text-gray-500 hover:text-red-500 cursor-pointer p-2 transition-colors"
                       aria-label="Hapus Produk"
-                      className="text-gray-500 hover:text-red-500"
                     >
                       <Trash2 size={16} />
                     </button>
