@@ -1,115 +1,542 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Download, Search, Edit, X, Package, Trash2, Plus } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { Trash2, Edit2, Plus, Download, X } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { useRouter } from "next/navigation";
 
-export default function Products() {
+export default function ProductsPage() {
+  const router = useRouter();
   const [products, setProducts] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // 1. UPDATE STATE FORM DATA (Menambahkan harga_beli)
+  const [formData, setFormData] = useState({
+    nama: "",
+    harga_beli: "",
+    harga: "",
+    satuan: "pcs",
+    kategori: "ATK",
+  });
+
+  const fetchProducts = async () => {
+    const { data } = await supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setProducts(data || []);
+  };
 
   useEffect(() => {
-    async function fetchProducts() {
-      const { data } = await supabase.from("products").select("*");
-      setProducts(data || []);
-    }
-    fetchProducts();
-  }, []);
+    const init = async () => {
+      setIsLoading(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/");
+        return;
+      }
 
-  const handleEdit = (id: any) => console.log("Edit:", id);
-  const handleDelete = (id: any) => console.log("Hapus:", id);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+      if (profile?.role === "petugas") {
+        alert("Akses Ditolak!");
+        router.push("/pos");
+        return;
+      }
+      await fetchProducts();
+      setIsLoading(false);
+    };
+    init();
+  }, [router]);
+
+  // 2. UPDATE FUNGSI RESET & OPEN MODAL
+  const handleOpenAdd = () => {
+    setEditingId(null);
+    setFormData({
+      nama: "",
+      harga_beli: "",
+      harga: "",
+      satuan: "pcs",
+      kategori: "ATK",
+    });
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingId(null);
+    setFormData({
+      nama: "",
+      harga_beli: "",
+      harga: "",
+      satuan: "pcs",
+      kategori: "ATK",
+    });
+  };
+
+  const openEditModal = (p: any) => {
+    setEditingId(p.id);
+    setFormData({
+      nama: p.nama || "",
+      harga_beli: p.harga_beli?.toString() || "",
+      harga: p.harga?.toString() || "",
+      satuan: p.satuan || "pcs",
+      kategori: p.kategori || "ATK",
+    });
+    setIsModalOpen(true);
+  };
+
+  // 3. UPDATE HANDLING SAVE DATA TO SUPABASE
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+
+    const payload = {
+      nama: formData.nama,
+      harga_beli: parseFloat(formData.harga_beli) || 0,
+      harga: parseFloat(formData.harga) || 0,
+      satuan: formData.satuan,
+      kategori: formData.kategori,
+    };
+
+    try {
+      if (editingId) {
+        // --- MODE EDIT PRODUK ---
+        const { error } = await supabase
+          .from("products")
+          .update(payload)
+          .eq("id", editingId);
+        if (error) throw error;
+      } else {
+        // --- MODE TAMBAH PRODUK BARU ---
+        const { data: existingProduct } = await supabase
+          .from("products")
+          .select("id")
+          .ilike("nama", formData.nama)
+          .maybeSingle();
+
+        if (existingProduct) {
+          alert("Gagal: Nama produk ini sudah terdaftar di sistem!");
+          setIsSaving(false);
+          return;
+        }
+
+        const { error } = await supabase
+          .from("products")
+          .insert([{ ...payload, stok: 0 }]);
+        if (error) throw error;
+      }
+
+      closeModal();
+      await fetchProducts();
+    } catch (err: any) {
+      alert("Gagal menyimpan data: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Yakin hapus produk ini?")) return;
+
+    const product = products.find((p) => p.id === id);
+    const { count } = await supabase
+      .from("order_items")
+      .select("*", { count: "exact", head: true })
+      .eq("kd_prod", product?.kd_prod);
+
+    if (count && count > 0) {
+      alert(
+        `Produk tidak bisa dihapus karena sudah memiliki riwayat transaksi keluar.`,
+      );
+      return;
+    }
+
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) alert("Gagal hapus: " + error.message);
+    else await fetchProducts();
+  };
+
+  // 4. UPDATE EXPORT PDF (Menambahkan kolom Harga Beli & Laba)
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.text("Laporan Data Produk", 14, 20);
+    doc.text("BMT SMK Assyafi'iyah", 14, 26);
+    doc.setFontSize(10);
+    doc.text(`Tanggal: ${new Date().toLocaleDateString("id-ID")}`, 14, 33);
+
+    autoTable(doc, {
+      head: [
+        [
+          "Kd. Produk",
+          "Nama Produk",
+          "Harga Beli",
+          "Harga Jual",
+          "Laba",
+          "Stok",
+          "Satuan",
+          "Kategori",
+        ],
+      ],
+      body: products.map((p) => {
+        const laba = (p.harga || 0) - (p.harga_beli || 0);
+        return [
+          p.kd_prod || "-",
+          p.nama || "-",
+          `Rp ${Number(p.harga_beli || 0).toLocaleString("id-ID")}`,
+          `Rp ${Number(p.harga || 0).toLocaleString("id-ID")}`,
+          `Rp ${Number(laba).toLocaleString("id-ID")}`,
+          p.stok?.toString() || "0",
+          p.satuan || "-",
+          p.kategori || "-",
+        ];
+      }),
+      startY: 40,
+      theme: "grid",
+      headStyles: { fillColor: [245, 158, 11] },
+      styles: { fontSize: 8 },
+    });
+    doc.save(`Products_Report_${new Date().getTime()}.pdf`);
+  };
+
+  const filtered = products.filter((p) =>
+    [p.kd_prod, p.nama, p.kategori, p.satuan]
+      .join(" ")
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
 
   return (
-    <div className="p-8 bg-[#0f1117] text-gray-200 min-h-screen relative">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-white">Master Produk</h1>
+    <div className="flex flex-col gap-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Master Produk</h1>
+        </div>
         <div className="flex gap-2">
-          <button className="bg-transparent border border-gray-600 text-gray-300 px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-[#1a1f2b]">
-            <Download size={18} /> Cetak PDF
+          <button
+            onClick={exportToPDF}
+            title="Cetak PDF"
+            aria-label="Cetak PDF"
+            className="flex items-center gap-2 px-4 py-2 bg-[#141820] border border-white/8 text-gray-300 hover:text-white rounded-xl text-sm transition-all shadow-lg"
+          >
+            <Download size={15} /> Cetak PDF
           </button>
           <button
-            onClick={() => setIsModalOpen(true)}
-            className="bg-amber-500 text-black px-4 py-2 rounded-lg font-bold flex items-center gap-2"
+            onClick={handleOpenAdd}
+            title="Tambah Produk Baru"
+            aria-label="Tambah Produk Baru"
+            className="flex items-center gap-2 px-4 py-2 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-xl text-sm font-semibold transition-all shadow-lg"
           >
-            <Plus size={18} /> Tambah Produk
+            <Plus size={15} /> Tambah Produk
           </button>
         </div>
       </div>
 
-      <div className="bg-[#141820] border border-white/5 rounded-xl overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="text-gray-500 text-xs uppercase">
-            <tr>
-              <th className="p-4">Kd. Produk</th>
-              <th className="p-4">Nama</th>
-              <th className="p-4">Harga Jual</th>
-              <th className="p-4">Stok</th>
-              <th className="p-4">Satuan</th>
-              <th className="p-4">Kategori</th>
-              <th className="p-4 text-right">Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((p) => (
-              <tr
-                key={p.id}
-                className="border-t border-white/5 hover:bg-white/5"
-              >
-                <td className="p-4">
-                  <span className="bg-[#1a1f2b] text-amber-500 px-2 py-1 rounded text-xs font-bold">
-                    {p.code}
-                  </span>
-                </td>
-                <td className="p-4 font-medium">{p.name}</td>
-                <td className="p-4">
-                  Rp {Number(p.price).toLocaleString("id-ID")}
-                </td>
-                <td className="p-4">
-                  <span className="bg-green-900/30 text-green-400 px-2 py-1 rounded text-xs font-bold">
-                    {p.stock}
-                  </span>
-                </td>
-                <td className="p-4">{p.unit}</td>
-                <td className="p-4">{p.category}</td>
-                <td className="p-4 text-right">
-                  <div className="flex justify-end gap-3">
-                    <button
-                      onClick={() => handleEdit(p.id)}
-                      className="text-gray-500 hover:text-white cursor-pointer p-2"
-                      aria-label="Edit Produk"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="text-gray-500 hover:text-red-500 cursor-pointer p-2"
-                      aria-label="Hapus Produk"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
+      {/* Tabel */}
+      <div className="bg-[#141820] border border-white/5 rounded-2xl overflow-hidden">
+        <div className="p-4 border-b border-white/5 flex justify-end">
+          <div className="relative">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+              size={14}
+            />
+            <input
+              type="text"
+              placeholder="Cari produk..."
+              title="Cari Produk"
+              aria-label="Cari Produk"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="bg-[#0f1117] border border-white/8 text-white text-sm pl-9 pr-4 py-2 rounded-lg w-56 focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-white/5 text-xs text-gray-500 uppercase tracking-wider">
+                <th className="px-5 py-3 text-left font-medium">Kd. Produk</th>
+                <th className="px-5 py-3 text-left font-medium">Nama</th>
+                {/* 5. MENAMBAHKAN TH DI TABEL */}
+                <th className="px-5 py-3 text-left font-medium">Harga Beli</th>
+                <th className="px-5 py-3 text-left font-medium">Harga Jual</th>
+                <th className="px-5 py-3 text-left font-medium">Laba</th>
+                <th className="px-5 py-3 text-left font-medium">Stok</th>
+                <th className="px-5 py-3 text-left font-medium">Satuan</th>
+                <th className="px-5 py-3 text-left font-medium">Kategori</th>
+                <th className="px-5 py-3 text-right font-medium">Aksi</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {isLoading ? (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-10 text-center text-gray-500 animate-pulse"
+                  >
+                    Memuat data...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-10 text-center text-gray-500"
+                  >
+                    Produk tidak ditemukan.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((p) => {
+                  {
+                    /* 6. LOGIKA PERHITUNGAN LABA */
+                  }
+                  const keuntungan = (p.harga || 0) - (p.harga_beli || 0);
+                  return (
+                    <tr
+                      key={p.id}
+                      className="hover:bg-white/2 transition-colors"
+                    >
+                      <td className="px-5 py-4">
+                        <span className="bg-[#f59e0b]/10 text-[#f59e0b] text-xs font-mono font-semibold px-2.5 py-1 rounded-lg">
+                          {p.kd_prod}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-white font-medium">
+                        {p.nama}
+                      </td>
+                      {/* 7. MENAMPILKAN DATA DI KOLOM BARU */}
+                      <td className="px-5 py-4 text-gray-300">
+                        Rp {Number(p.harga_beli || 0).toLocaleString("id-ID")}
+                      </td>
+                      <td className="px-5 py-4 text-gray-300">
+                        Rp {Number(p.harga).toLocaleString("id-ID")}
+                      </td>
+                      <td
+                        className={`px-5 py-4 font-medium ${keuntungan < 0 ? "text-red-400" : "text-green-400"}`}
+                      >
+                        Rp {Number(keuntungan).toLocaleString("id-ID")}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${p.stok <= 0 ? "bg-red-400/10 text-red-400" : p.stok <= 5 ? "bg-yellow-400/10 text-yellow-400" : "bg-green-400/10 text-green-400"}`}
+                        >
+                          {p.stok ?? 0}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-gray-400">
+                        {p.satuan || "-"}
+                      </td>
+                      <td className="px-5 py-4 text-gray-400">
+                        {p.kategori || "-"}
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(p)}
+                            title="Edit Produk"
+                            aria-label="Edit Produk"
+                            className="p-1.5 text-gray-500 hover:text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-lg transition-all"
+                          >
+                            <Edit size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(p.id)}
+                            title="Hapus Produk"
+                            aria-label="Hapus Produk"
+                            className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* Modal Form */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#141820] p-6 rounded-xl border border-white/10 w-96">
-            <div className="flex justify-between mb-4">
-              <h2 className="text-xl font-bold">Tambah Produk</h2>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#141820] border border-white/8 rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-[#f59e0b]/10 rounded-lg flex items-center justify-center">
+                  <Package size={16} className="text-[#f59e0b]" />
+                </div>
+                <h2 className="text-base font-semibold text-white">
+                  {editingId ? "Edit Produk" : "Tambah Master Produk Baru"}
+                </h2>
+              </div>
               <button
-                onClick={() => setIsModalOpen(false)}
+                type="button"
+                onClick={closeModal}
+                title="Tutup Modal"
                 aria-label="Tutup Modal"
+                className="text-gray-500 hover:text-white transition-colors"
               >
-                <X />
+                <X size={18} />
               </button>
             </div>
-            <p className="text-gray-400">
-              Form input produk akan muncul di sini.
-            </p>
+            <form
+              onSubmit={handleSave}
+              autoComplete="off"
+              className="p-6 flex flex-col gap-4"
+            >
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                  Nama Produk <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  title="Nama Produk"
+                  aria-label="Nama Produk"
+                  value={formData.nama}
+                  onChange={(e) =>
+                    setFormData({ ...formData, nama: e.target.value })
+                  }
+                  placeholder="Cth: Pulpen Standar"
+                  className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+                />
+              </div>
+
+              {/* 8. MENAMBAHKAN INPUT INPUT BARU UNTUK HARGA BELI */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Harga Beli Pemasok (Rp){" "}
+                    <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    title="Harga Beli"
+                    aria-label="Harga Beli"
+                    value={formData.harga_beli}
+                    onChange={(e) =>
+                      setFormData({ ...formData, harga_beli: e.target.value })
+                    }
+                    placeholder="Cth: 2000"
+                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Harga Jual (Rp) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    title="Harga Jual"
+                    aria-label="Harga Jual"
+                    value={formData.harga}
+                    onChange={(e) =>
+                      setFormData({ ...formData, harga: e.target.value })
+                    }
+                    placeholder="Cth: 3000"
+                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all placeholder:text-gray-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    SATUAN
+                  </label>
+                  <select
+                    title="Pilih Satuan"
+                    aria-label="Pilih Satuan"
+                    value={formData.satuan}
+                    onChange={(e) =>
+                      setFormData({ ...formData, satuan: e.target.value })
+                    }
+                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all"
+                  >
+                    <option value="pcs">Pcs</option>
+                    <option value="kg">Kg</option>
+                    <option value="liter">Liter</option>
+                    <option value="dus">Dus</option>
+                    <option value="lusin">Lusin</option>
+                    <option value="pack">Pack</option>
+                    <option value="botol">Botol</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    KATEGORI
+                  </label>
+                  <select
+                    title="Pilih Kategori"
+                    aria-label="Pilih Kategori"
+                    value={formData.kategori}
+                    onChange={(e) =>
+                      setFormData({ ...formData, kategori: e.target.value })
+                    }
+                    className="bg-[#0f1117] border border-white/8 text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-[#f59e0b]/50 transition-all"
+                  >
+                    <option value="ATK">ATK</option>
+                    <option value="Makanan">Makanan</option>
+                    <option value="Minuman">Minuman</option>
+                    <option value="P3K">P3K</option>
+                    <option value="Seragam">Seragam</option>
+                  </select>
+                </div>
+              </div>
+
+              {!editingId && (
+                <div className="bg-[#f59e0b]/5 border border-[#f59e0b]/15 rounded-xl px-4 py-3 mt-2">
+                  <p className="text-xs text-gray-500">
+                    💡 Produk baru akan dibuat dengan{" "}
+                    <span className="text-[#f59e0b]">Stok: 0</span>. Lakukan
+                    pengisian stok melalui menu <b>Barang Masuk</b>.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-white/5 mt-2">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  title="Batal"
+                  aria-label="Batal"
+                  className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  title="Simpan"
+                  aria-label="Simpan"
+                  className="px-6 py-2 text-sm font-semibold bg-[#f59e0b] hover:bg-[#d97706] disabled:opacity-50 text-white rounded-xl transition-all shadow-lg shadow-[#f59e0b]/20"
+                >
+                  {isSaving ? "Menyimpan..." : "Simpan"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
