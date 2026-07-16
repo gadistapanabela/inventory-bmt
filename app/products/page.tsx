@@ -73,23 +73,22 @@ export default function ProductsPage() {
     };
   }, [router]);
 
-  // FUNGSI BUAT KODE PRODUK OTOMATIS (Cth: PRD-001)
+  // FUNGSI BUAT KODE PRODUK OTOMATIS (Menggunakan kd_prod)
   const generateProductCode = async () => {
     const { data } = await supabase
       .from("products")
-      .select("kd_produk")
+      .select("kd_prod")
       .order("created_at", { ascending: false });
 
-    if (!data || data.length === 0) return "PRD-001";
+    if (!data || data.length === 0) return "PRD001";
 
-    // Cari kode terakhir yang valid
     const lastProduct = data.find(
-      (p) => p.kd_produk && p.kd_produk.startsWith("PRD-"),
+      (p) => p.kd_prod && p.kd_prod.startsWith("PRD"),
     );
-    if (!lastProduct) return `PRD-${String(data.length + 1).padStart(3, "0")}`;
+    if (!lastProduct) return `PRD${String(data.length + 1).padStart(3, "0")}`;
 
-    const lastNum = parseInt(lastProduct.kd_produk.split("-")[1]) || 0;
-    return `PRD-${String(lastNum + 1).padStart(3, "0")}`;
+    const lastNum = parseInt(lastProduct.kd_prod.replace("PRD", "")) || 0;
+    return `PRD${String(lastNum + 1).padStart(3, "0")}`;
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -124,12 +123,12 @@ export default function ProductsPage() {
           return;
         }
 
-        // Generate kode produk otomatis sebelum insert
+        // Generate kode produk otomatis menggunakan kd_prod
         const generatedCode = await generateProductCode();
 
         const { error } = await supabase
           .from("products")
-          .insert([{ ...payload, kd_produk: generatedCode, stok: 0 }]);
+          .insert([{ ...payload, kd_prod: generatedCode, stok: 0 }]);
         if (error) throw error;
       }
 
@@ -151,7 +150,7 @@ export default function ProductsPage() {
     const { count } = await supabase
       .from("order_items")
       .select("*", { count: "exact", head: true })
-      .eq("kd_prod", product?.kd_produk);
+      .eq("kd_prod", product?.kd_prod);
 
     if (count && count > 0) {
       alert(
@@ -186,7 +185,7 @@ export default function ProductsPage() {
       ],
       body: products.map((p) => {
         return [
-          p.kd_produk || "-",
+          p.kd_prod || "-",
           p.nama || "-",
           `Rp ${Number(p.harga || 0).toLocaleString("id-ID")}`,
           p.stok?.toString() || "0",
@@ -203,7 +202,7 @@ export default function ProductsPage() {
   };
 
   const filtered = products.filter((p) =>
-    [p.kd_produk, p.nama, p.kategori, p.satuan]
+    [p.kd_prod, p.nama, p.kategori, p.satuan]
       .join(" ")
       .toLowerCase()
       .includes(search.toLowerCase()),
@@ -302,7 +301,7 @@ export default function ProductsPage() {
                     >
                       <td className="px-5 py-4">
                         <span className="bg-[#1a1f2b] text-[#f59e0b] text-xs font-mono font-bold px-2.5 py-1 rounded-lg">
-                          {p.kd_produk || "-"}
+                          {p.kd_prod || "-"}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-white font-medium">
